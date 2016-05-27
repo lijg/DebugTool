@@ -1,0 +1,1 @@
+pyinstaller -w -F --icon="tools.ico" DebugTool.spec
