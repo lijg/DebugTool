@@ -11,8 +11,9 @@ DebugTool 通用调试工具界面
 '''
 
 import os
+import functools
 import sys
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTextCodec
 from PyQt5.QtWidgets import (
     QWidget,
     QMainWindow,
@@ -25,7 +26,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QTextCursor, QIcon
 
 # 命令由CommandHandler处理
-from CommandHandler import Handler
+from CommandHandler import HandlerManager
 
 import TextFormatter
 
@@ -41,7 +42,8 @@ HISTORY_FILE = '.history'
 # 其他用户命令由CommandHandler处理
 CMD_EXIT = 'exit'
 CMD_CLEAR = 'clear'
-CMD_SOURCE = 'source'
+CMD_HELP = 'help'
+CMD_COMMENT = '#'
 
 
 def resource_path(rel_path):
@@ -136,10 +138,8 @@ class DebugTool(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.initUI()
-
         # 创建CommandHandler
-        self.handler = Handler()
+        self.handler = HandlerManager()
 
         # CommandHandler的输出结果通过outSignal信号返回给DebugTool
         self.handler.outSignal.connect(self.writeOutput)
@@ -147,13 +147,17 @@ class DebugTool(QMainWindow):
         # 启动CommandHandler的后台线程
         self.handler.start()
 
+        self.initUI()
+
+        # QTextCodec.setCodecForCStrings(QTextCodec.codecForName("UTF-8"))
+
     def initMenuAndToolbar(self):
         '''
         初始化菜单和工具栏
 
         菜单：
             File
-                -- Connect
+                -- Open File
                 -- 分隔符
                 -- Exit
             Command
@@ -164,10 +168,10 @@ class DebugTool(QMainWindow):
 
         '''
 
-        # 连接
-        iconpath = resource_path('connect.png')
-        connectAction = QAction(QIcon(iconpath), 'Connect', self)
-        connectAction.triggered.connect(self.onConnect)
+        # 打开文件
+        iconpath = resource_path('openfile.png')
+        sendAction = QAction(QIcon(iconpath), 'OpenFile', self)
+        sendAction.triggered.connect(self.onOpenFile)
 
         # 退出
         iconpath = resource_path('exit.png')
@@ -178,20 +182,44 @@ class DebugTool(QMainWindow):
         helpAction = QAction(QIcon(iconpath), 'Help', self)
         helpAction.triggered.connect(self.onHelp)
 
-        # 打开文件
-        iconpath = resource_path('openfile.png')
-        sendAction = QAction(QIcon(iconpath), 'OpenFile', self)
-        sendAction.triggered.connect(self.onOpenFile)
+        # 使能所有插件
+        iconpath = resource_path('activate.png')
+        activateAllAction = QAction(QIcon(iconpath), 'ActivateAll', self)
+        activateAllAction.triggered.connect(self.onActivateAll)
+
+        # 禁用所有插件
+        iconpath = resource_path('deactivate.png')
+        deactivateAllAction = QAction(QIcon(iconpath), 'DeactivateAll', self)
+        deactivateAllAction.triggered.connect(self.onDeactivateAll)
 
         # File菜单
         fileMenu = self.menuBar().addMenu('&File')
-        fileMenu.addAction(connectAction)
+        fileMenu.addAction(sendAction)
         fileMenu.addSeparator()
         fileMenu.addAction(exitAction)
 
-        # Command菜单
-        cmdMenu = self.menuBar().addMenu('&Command')
-        cmdMenu.addAction(sendAction)
+        # Plugin菜单
+        pluginMenu = self.menuBar().addMenu('&Plugin')
+        pluginMenu.addAction(activateAllAction)
+        pluginMenu.addAction(deactivateAllAction)
+        pluginMenu.addSeparator()
+
+        for plugin in self.handler.getAllPlugins():
+            pluginSubMenu = pluginMenu.addMenu(plugin.plugin_object.name)
+
+            iconpath = resource_path('activate.png')
+            pluginActivateAction = QAction(QIcon(iconpath), "Activate", self)
+            pluginActivateAction.triggered.connect(functools.partial(
+                self.onPluginClicked, plugin.plugin_object.name, True))
+
+            iconpath = resource_path('deactivate.png')
+            pluginDeactivateAction = QAction(
+                QIcon(iconpath), "Deactivate", self)
+            pluginDeactivateAction.triggered.connect(functools.partial(
+                self.onPluginClicked, plugin.plugin_object.name, False))
+
+            pluginSubMenu.addAction(pluginActivateAction)
+            pluginSubMenu.addAction(pluginDeactivateAction)
 
         # About菜单
         aboutMenu = self.menuBar().addMenu('&About')
@@ -200,9 +228,9 @@ class DebugTool(QMainWindow):
         # 工具栏
         toolbar = self.addToolBar('MainToolBar')
         toolbar.setMovable(False)
-        toolbar.addAction(connectAction)
+        # toolbar.addAction(connectAction)
         toolbar.addAction(sendAction)
-        toolbar.addAction(helpAction)
+        # toolbar.addAction(helpAction)
         # toolbar.addAction(exitAction)
 
     def initMainUI(self):
@@ -257,46 +285,40 @@ class DebugTool(QMainWindow):
 
     def onOpenFile(self):
         '''
-        打开命令文件，支持一次打开多个文件
+        打开窗口，选择命令文件，支持一次选择多个文件
         '''
-        filenames, _ = QFileDialog.getOpenFileNames(
+        filepaths, _ = QFileDialog.getOpenFileNames(
             self, 'Open file', None, 'Command Files (*.cmd);;All Files (*)')
 
-        if filenames:
-            for file in filenames:
-                self.processFile(file)
-
-    def processFile(self, filepath):
-        filepath = os.path.normpath(filepath)
-        if os.path.isfile(filepath) and os.access(filepath, os.R_OK):
-            self.writeOutput(1, 'source ' + filepath)
-            with open(filepath, 'r') as f:
-                for line in f.readlines():
-                    line = line.strip()
-                    self.processCommand(filepath, line)
-        else:
-            self.writeOutput(2, 'Cannot open file: ' + filepath)
+        if filepaths:
+            for filepath in filepaths:
+                filepath = os.path.normpath(filepath)
+                self.handler.processFile(filepath)
 
     def onHelp(self):
-        self.processCommand('.', 'help')
+        '''
+        打印帮助命令
+        '''
+        self.processCommand(CMD_HELP)
 
     def onCmdlineRerurnPressed(self):
         '''
-        获取用户输入，执行，然后清空cmdline
+        当用户按下回车键时触发此函数
+        获取用户输入，清空cmdline，然后将命令提交给处理函数
         '''
         userInput = str(self.cmdline.text()).strip()
         self.cmdline.clear()
         self.cmdline.addHistory(userInput)
 
-        self.processCommand('.', userInput)
+        self.processCommand(userInput)
 
-    def processCommand(self, currentFilePath, userInput):
+    def processCommand(self, userInput):
         '''
         判断命令类型，如果是基础命令，如exit和clear等，直接执行;
         否则，发送给CommandHandler执行
         '''
-        # print(userInput)
-        if not len(userInput) or userInput.startswith('#'):
+        # 如果时空命令或注释，直接返回
+        if not len(userInput) or userInput.startswith(CMD_COMMENT):
             return
 
         # 获取用户输入的第一个单词作为命令
@@ -306,23 +328,9 @@ class DebugTool(QMainWindow):
             self.close()
         elif command == CMD_CLEAR:
             self.logOutput.clear()
-        elif command == CMD_SOURCE:
-            if len(params) == 1:
-                filepath = params[0]
-                if not os.path.isabs(filepath):
-                    basepath = os.path.dirname(currentFilePath)
-                    filepath = os.path.normpath(filepath)
-                    # print("basepath: " + basepath)
-                    # print("normalpath: " + filepath)
-                    filepath = os.path.join(basepath, filepath)
-                    # print("filepath: " + filepath)
-                self.processFile(filepath)
-                
-            else:
-                self.writeOutput(2, 'syntax error: ' + userInput)
         else:
             # 提交给CommandHandler处理
-            self.handler.process(userInput)
+            self.handler.processInput(userInput)
 
     def writeOutput(self, textType, commandOutput):
         '''
@@ -334,7 +342,8 @@ class DebugTool(QMainWindow):
         3   -   自定义RichText
         '''
         if textType == 0:
-            self.logOutput.insertPlainText(TextFormatter.fStdout(commandOutput))
+            self.logOutput.insertPlainText(
+                TextFormatter.fStdout(commandOutput))
         elif textType == 1:
             self.logOutput.insertHtml(TextFormatter.fCommand(commandOutput))
         elif textType == 2:
@@ -344,6 +353,18 @@ class DebugTool(QMainWindow):
 
         # 滚动到最新的内容
         self.logOutput.moveCursor(QTextCursor.End)
+
+    def onDeactivateAll(self):
+        self.handler.deactivateAllPlugins()
+
+    def onActivateAll(self):
+        self.handler.activateAllPlugins()
+
+    def onPluginClicked(self, name, activate):
+        if activate:
+            self.handler.activatePlugin(name)
+        else:
+            self.handler.deactivatePlugin(name)
 
     def closeEvent(self, event):
         '''

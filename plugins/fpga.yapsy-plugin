@@ -1,0 +1,9 @@
+[Core]
+Name = FPGA Debug Handler
+Module = fpga
+
+[Documentation]
+Author = lijg
+Version = 0.1
+Website = http://lijg.me
+Description = FPGA Debug Handler

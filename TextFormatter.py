@@ -8,6 +8,7 @@
 日期: 2016-05-25
 '''
 
+
 def fCommand(text):
     '''
     用户输入，蓝色加粗，加换行
@@ -15,12 +16,14 @@ def fCommand(text):
     return ('<font color="blue"><b>&gt; {}</b></font>'.format(text) +
             '<br />')
 
+
 def fStderr(text):
     '''
     错误显示，红色加粗，换两行
     '''
     return ('<font color="red"><b>{}</b></font>'.format(text) +
             '<br /><br />')
+
 
 def fStdout(text):
     '''

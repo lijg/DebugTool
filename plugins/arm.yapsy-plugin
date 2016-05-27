@@ -1,0 +1,9 @@
+[Core]
+Name = ARM Debug Handler
+Module = arm
+
+[Documentation]
+Author = lijg
+Version = 0.1
+Website = http://lijg.me
+Description = ARM Debug Handler
