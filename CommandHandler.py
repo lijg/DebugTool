@@ -125,14 +125,19 @@ class HandlerManager(QThread):
             self.writeStderr('Cannot open file: ' + filepath)
 
     def dispatchCommand(self, userInput):
-        status = DPlugin.EXEC_NOTFOUND
-        for plugin in self.pluginManager.getPluginsOfCategory('DPlugin'):
-            status, resultText = plugin.plugin_object.execCommand(userInput)
+        '''将命令分发给各个插件'''
 
-            if status == DPlugin.EXEC_SUCCESS:
+        status = DPlugin.EXEC_NOTFOUND
+
+        for plugin in self.pluginManager.getPluginsOfCategory('DPlugin'):
+            ret, resultText = plugin.plugin_object.execCommand(userInput)
+
+            if ret == DPlugin.EXEC_SUCCESS:
                 self.writeStdout(resultText)
-            elif status == DPlugin.EXEC_FAILED:
+                status = DPlugin.EXEC_SUCCESS
+            elif ret == DPlugin.EXEC_FAILED:
                 self.writeStderr(resultText)
+                status = DPlugin.EXEC_FAILED
 
         if status == DPlugin.EXEC_NOTFOUND:
             self.writeStderr(userInput + ': Command not found')
